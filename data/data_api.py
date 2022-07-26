@@ -2,7 +2,6 @@
 
 class EEGDataset:
     number_of_channels: int
-    sample_frequency: float
 
     def get_cases(self):
         """
