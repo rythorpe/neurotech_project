@@ -4,13 +4,13 @@ import numpy as np
 from scipy.io import loadmat
 from scipy import stats
 from scipy import ndimage
+from scipy.special import comb
 import matplotlib.pyplot as plt
 from lempel_ziv_complexity import lempel_ziv_complexity
 
 
 def normalize_data(data):
     """Z-score each channel independently"""
-
     return stats.zscore(data, axis=1)
 
 
@@ -30,7 +30,6 @@ def find_perturbations(timeseries, thresh):
 
 def get_data_windows(timeseries, win_beginnings, win_length):
     """Get windows of data across all channels beginning at each onset time"""
-
     # prevent overlapping windows
     previous = [win_beginnings[0]]
     for win_beginning in win_beginnings[1:]:
@@ -44,7 +43,7 @@ def get_data_windows(timeseries, win_beginnings, win_length):
     return data_windows
 
 
-def binarize_data(timeseries, thresh):
+def binarized_data(timeseries, thresh):
     """Threshold and convert each electrode channel to a binary string"""
     n_chan = timeseries.shape[0]
 
@@ -57,18 +56,43 @@ def binarize_data(timeseries, thresh):
     return binary_strings
 
 
+def get_combinations(element_idxs, combination_size):
+    """Compute all combinations recursively"""
+
+    combs = list()
+
+    for el_idx in element_idxs:
+        if combination_size > 1:
+            # find the compliment subset
+            other_element_idxs = [other_idx for other_idx in element_idxs if
+                                  other_idx > el_idx]
+            # get all sub-combinations of the compliment set
+            sub_combs = get_combinations(other_element_idxs,
+                                         combination_size - 1)
+            # append each sub-combination to a copy of the current item
+            for sub_comb in sub_combs:
+                combs.append([el_idx] + sub_comb)
+        else:
+            combs.append([el_idx])
+
+    return combs
+
+
 def opt_channel_subset(data_binary, n_chan_subset):
     """Find optimal subset of electrode channels using brute force approach"""
-    n_chan = len(data_binary)
+    data_binary = np.array(data_binary)
+    n_chan = data_binary.shape[0]
 
-    for chan_idx, binary_str in enumerate(data_binary):
-        while n_chan_subset > 0:
-            compliment_chans = list(range(chan_idx))
-            opt_channel_subset(data_binary)
+    idx_combinations = get_combinations(range(n_chan), n_chan_subset)
+    complexities = np.zeros(len(idx_combinations))
 
-    chan_idxs, complexities = None, None
+    for idx, combination in enumerate(idx_combinations):
+        selected_channels = data_binary[combination].tolist()
+        complexities[idx], _ = lempel_ziv_complexity(selected_channels)
 
-    return chan_idxs, complexities
+    sorting_idxs = np.argsort(complexities)
+
+    return complexities[sorting_idxs], complexities[sorting_idxs]
 
 
 def est_channel_subset(data_binary, n_chan_subset):
@@ -80,10 +104,16 @@ def est_channel_subset(data_binary, n_chan_subset):
     return chan_idxs, complexities
 
 
-def plot_electrode_complexities(placements, complexities):
-    fig, ax = plt.subplots(1, 1)
+def plot_electrode_complexities(complexities, ax=None, labels=None):
+    if ax is None:
+        fig, ax = plt.subplots(1, 1)
+    else:
+        fig = ax.get_figure()
+    ax.plot(range(len(complexities)), complexities)
+    ax.set_ylabel('complexity index')
+    ax.set_xlabel('electrode configuration')
 
-    return fig
+    return fig, ax
 
 
 if __name__ == "__main__":
@@ -94,7 +124,7 @@ if __name__ == "__main__":
 
     data_normalized = normalize_data(data)
 
-    std_thresh = 4.
+    std_thresh = 3.
     perturbation_idxs = find_perturbations(timeseries=data_normalized,
                                            thresh=std_thresh)
 
@@ -107,15 +137,20 @@ if __name__ == "__main__":
     data_post_perturbation = get_data_windows(timeseries=data_normalized,
                                               win_beginnings=perturbation_idxs,
                                               win_length=win_length)
-    std_thresh = 2.
-    data_binary = binarize_data(timeseries=data_post_perturbation,
-                                thresh=std_thresh)
+    std_thresh = 1.5
+    data_binary = binarized_data(timeseries=data_post_perturbation,
+                                 thresh=std_thresh)
 
-    n_chan_subset = 4
-    opt_chan, opt_compl = opt_channel_subset(data_binary=data_binary,
-                                             n_chan_subset=n_chan_subset)
-    est_chan, est_compl = est_channel_subset(data_binary=data_binary,
-                                             n_chan_subset=n_chan_subset)
+    n_chans = range(4, 6)
+    fig, ax = plt.subplots(1, 1)
+    for n_chan_subset in n_chans:
+        opt_chans, opt_compl = opt_channel_subset(data_binary=data_binary,
+                                                  n_chan_subset=n_chan_subset)
+    #est_chans, est_compl = est_channel_subset(data_binary=data_binary,
+    #                                          n_chan_subset=n_chan_subset)
 
-    fig = plot_electrode_complexities(opt_chan, opt_compl)
+        fig, ax = plot_electrode_complexities(opt_compl, ax=ax)
+    labels = [f'{n_chan_subset} electrodes' for n_chan_subset in n_chans]
+    ax.legend(labels)
+
     plt.show()
