@@ -87,14 +87,14 @@ def opt_channel_subset(data_binary, n_chan_subset):
 
     for idx, combination in enumerate(combinations):
         selected_channels = data_binary[combination].tolist()
-        complexity, _ = lempel_ziv_complexity(selected_channels)
+        complexity = lempel_ziv_complexity(selected_channels)
         complexity *= normalization_factor(selected_channels)  # XXX fix
         complexities[idx] = complexity
 
     sorting_idxs = np.argsort(complexities)
     best_chan_subset = combinations[sorting_idxs[-1]]
 
-    return best_chan_subset, complexities[sorting_idxs]
+    return best_chan_subset, complexities[-1], complexities[sorting_idxs]
 
 
 def est_channel_subset(data_binary, n_chan_subset, lr=0.05, epsilon=0.1,
@@ -109,12 +109,13 @@ def est_channel_subset(data_binary, n_chan_subset, lr=0.05, epsilon=0.1,
 
     # compute initial complexity index
     chans_chosen_data = data_binary[chans_chosen].tolist()
-    max_complexity, _ = lempel_ziv_complexity(chans_chosen_data)
+    max_complexity = lempel_ziv_complexity(chans_chosen_data)
     max_complexity *= normalization_factor(chans_chosen_data)  # XXX fix
 
     complexities = np.zeros(max_iter)
+    iter_idx = 0
 
-    for iter_idx in range(max_iter):
+    while iter_idx < max_iter:
         # select channels
         for choice_idx in range(n_chan_subset):
             previous_choice = chans_chosen[choice_idx]
@@ -139,18 +140,30 @@ def est_channel_subset(data_binary, n_chan_subset, lr=0.05, epsilon=0.1,
 
             # compute complexity index
             chans_chosen_data = data_binary[chans_chosen].tolist()
-            complexity, _ = lempel_ziv_complexity(chans_chosen_data)
+            complexity = lempel_ziv_complexity(chans_chosen_data)
             complexity *= normalization_factor(chans_chosen_data)  # XXX fix
             complexities[iter_idx] = complexity
 
+            if complexity > complexities[iter_idx - 1]:
+                #reward_prob[choice_idx, chans_chosen[choice_idx]] += lr
+                reward_prob[range(n_chan_subset), chans_chosen] += lr
+            else:
+                #reward_prob[choice_idx, chans_chosen[choice_idx]] -= lr
+                reward_prob[range(n_chan_subset), chans_chosen] -= lr
+            #reward_prob[choice_idx, :] /= np.sum(reward_prob[choice_idx, :])  # normalize
+            reward_prob /= np.tile(np.sum(reward_prob, axis=1, keepdims=True),
+                                   reps=(1, n_chan))  # normalize
+
+            # keep track of current best outcome (max complexity)
             if complexity > max_complexity:
-                reward_prob[choice_idx, chans_chosen[choice_idx]] += lr
-            reward_prob[choice_idx, :] /= np.sum(reward_prob[choice_idx, :])  # normalize
-            max_complexity = complexity
+                max_complexity = complexity
+                best_chan_subset = chans_chosen.copy()
 
-    best_chan_subset = np.argmax(reward_prob, axis=1)
+            iter_idx += 1
 
-    return best_chan_subset, complexities
+    # est_best_chan_subset = np.argmax(reward_prob, axis=1)
+
+    return best_chan_subset, max_complexity, complexities
 
 
 def plot_electrode_complexities(complexities, ax=None, labels=None):
@@ -193,17 +206,24 @@ if __name__ == "__main__":
     n_chans = range(4, 5)
     fig, ax = plt.subplots(1, 1)
     for n_chan_subset in n_chans:
-        opt_chans, opt_compl = opt_channel_subset(data_binary=data_binary,
-                                                  n_chan_subset=n_chan_subset)
-        est_chans, est_compl = est_channel_subset(data_binary=data_binary,
-                                                  n_chan_subset=n_chan_subset,
-                                                  lr=0.05,
-                                                  epsilon=0.01,
-                                                  max_iter=1000)
+        opt_chans, opt_compl, opt_traj = opt_channel_subset(
+            data_binary=data_binary,
+            n_chan_subset=n_chan_subset)
 
-        plot_electrode_complexities(opt_compl, ax=ax)
-        plot_electrode_complexities(est_compl, ax=ax)
+        est_chans, est_compl, est_traj = est_channel_subset(
+            data_binary=data_binary,
+            n_chan_subset=n_chan_subset,
+            lr=0.01,
+            epsilon=0.1,
+            max_iter=1000)
+
+        plot_electrode_complexities(opt_traj, ax=ax)
+        plot_electrode_complexities(est_traj, ax=ax)
+        ax.axhline(np.median(opt_traj))
+        ax.axhline(est_compl, label='')
     labels = [f'{n_chan_subset} electrodes' for n_chan_subset in n_chans]
     ax.legend(labels)
+    #plt.figure()
+    #plt.pcolormesh(est_chans)
 
     plt.show()
