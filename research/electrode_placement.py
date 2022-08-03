@@ -4,9 +4,8 @@ import numpy as np
 from scipy.io import loadmat
 from scipy import stats
 from scipy import ndimage
-from scipy.special import comb
 import matplotlib.pyplot as plt
-from lempel_ziv_complexity import lempel_ziv_complexity
+from lempel_ziv_complexity import lempel_ziv_complexity, normalization_factor
 
 
 def normalize_data(data):
@@ -83,25 +82,75 @@ def opt_channel_subset(data_binary, n_chan_subset):
     data_binary = np.array(data_binary)
     n_chan = data_binary.shape[0]
 
-    idx_combinations = get_combinations(range(n_chan), n_chan_subset)
-    complexities = np.zeros(len(idx_combinations))
+    combinations = get_combinations(range(n_chan), n_chan_subset)
+    complexities = np.zeros(len(combinations))
 
-    for idx, combination in enumerate(idx_combinations):
+    for idx, combination in enumerate(combinations):
         selected_channels = data_binary[combination].tolist()
-        complexities[idx], _ = lempel_ziv_complexity(selected_channels)
+        complexity, _ = lempel_ziv_complexity(selected_channels)
+        complexity *= normalization_factor(selected_channels)  # XXX fix
+        complexities[idx] = complexity
 
     sorting_idxs = np.argsort(complexities)
+    best_chan_subset = combinations[sorting_idxs[-1]]
 
-    return complexities[sorting_idxs], complexities[sorting_idxs]
+    return best_chan_subset, complexities[sorting_idxs]
 
 
-def est_channel_subset(data_binary, n_chan_subset):
-    """Estimate optimal subset of electrode channels using fast approach"""
-    n_chan = len(data_binary)
+def est_channel_subset(data_binary, n_chan_subset, lr=0.05, epsilon=0.1,
+                       max_iter=10000):
+    """Estimate optimal subset of electrode channels using quasi e-greedy MAB"""
+    data_binary = np.array(data_binary)
+    n_chan = data_binary.shape[0]
 
-    chan_idxs, complexities = None, None
+    channels = np.arange(n_chan)
+    reward_prob = np.ones((n_chan_subset, n_chan)) / n_chan  # uniform distr.
+    chans_chosen = np.arange(n_chan_subset)  # initialize channel subset
 
-    return chan_idxs, complexities
+    # compute initial complexity index
+    chans_chosen_data = data_binary[chans_chosen].tolist()
+    max_complexity, _ = lempel_ziv_complexity(chans_chosen_data)
+    max_complexity *= normalization_factor(chans_chosen_data)  # XXX fix
+
+    complexities = np.zeros(max_iter)
+
+    for iter_idx in range(max_iter):
+        # select channels
+        for choice_idx in range(n_chan_subset):
+            previous_choice = chans_chosen[choice_idx]
+            # channels that don't already occupy a slot in the subset
+            chans_avail = [chan for chan in channels if (chan is
+                           previous_choice) or (chan not in chans_chosen)]
+
+            # use best strategy: choose most rewarding channel that is 
+            # available
+            if np.random.random() > epsilon:
+                choices_ranked = np.argsort(reward_prob[choice_idx])
+                for choice in choices_ranked:
+                    if choice in chans_avail:
+                        chan_choice = choice
+                chans_chosen[choice_idx] = chan_choice
+
+            # random exploration
+            else:
+                chan_avail_idx = np.random.randint(len(chans_avail))
+                chan_choice = chans_avail[chan_avail_idx]
+                chans_chosen[choice_idx] = chan_choice
+
+            # compute complexity index
+            chans_chosen_data = data_binary[chans_chosen].tolist()
+            complexity, _ = lempel_ziv_complexity(chans_chosen_data)
+            complexity *= normalization_factor(chans_chosen_data)  # XXX fix
+            complexities[iter_idx] = complexity
+
+            if complexity > max_complexity:
+                reward_prob[choice_idx, chans_chosen[choice_idx]] += lr
+            reward_prob[choice_idx, :] /= np.sum(reward_prob[choice_idx, :])  # normalize
+            max_complexity = complexity
+
+    best_chan_subset = np.argmax(reward_prob, axis=1)
+
+    return best_chan_subset, complexities
 
 
 def plot_electrode_complexities(complexities, ax=None, labels=None):
@@ -111,8 +160,8 @@ def plot_electrode_complexities(complexities, ax=None, labels=None):
         fig = ax.get_figure()
     ax.plot(range(len(complexities)), complexities)
     ax.set_ylabel('complexity index')
-    ax.set_xlabel('electrode configuration')
-
+    ax.set_xlabel('iteration')
+    fig.show(False)
     return fig, ax
 
 
@@ -141,15 +190,19 @@ if __name__ == "__main__":
     data_binary = binarized_data(timeseries=data_post_perturbation,
                                  thresh=std_thresh)
 
-    n_chans = range(4, 6)
+    n_chans = range(4, 5)
     fig, ax = plt.subplots(1, 1)
     for n_chan_subset in n_chans:
         opt_chans, opt_compl = opt_channel_subset(data_binary=data_binary,
                                                   n_chan_subset=n_chan_subset)
-    #est_chans, est_compl = est_channel_subset(data_binary=data_binary,
-    #                                          n_chan_subset=n_chan_subset)
+        est_chans, est_compl = est_channel_subset(data_binary=data_binary,
+                                                  n_chan_subset=n_chan_subset,
+                                                  lr=0.05,
+                                                  epsilon=0.01,
+                                                  max_iter=1000)
 
-        fig, ax = plot_electrode_complexities(opt_compl, ax=ax)
+        plot_electrode_complexities(opt_compl, ax=ax)
+        plot_electrode_complexities(est_compl, ax=ax)
     labels = [f'{n_chan_subset} electrodes' for n_chan_subset in n_chans]
     ax.legend(labels)
 

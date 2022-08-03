@@ -20,6 +20,7 @@ __version__ = "0.2.2"
 
 
 from collections import OrderedDict
+from math import log2
 
 
 def lempel_ziv_decomposition(sequence):
@@ -123,13 +124,28 @@ def lempel_ziv_complexity(sequence, sub_strings=None):
     return len(sub_strings), sub_strings
 
 
+def normalization_factor(sequence):
+    """Calculate factor for normalizing the Lempel-Ziv complexity"""
+    if isinstance(sequence, str):
+        sequence = [sequence]
+
+    length = len(sequence) * len(sequence[0])
+    p = 0
+    for string in sequence:
+        for bit in string:
+            if bit == '1':
+                p += 1
+    p /= length
+
+    H = -(p * log2(p)) - ((1 - p) * log2(1 - p))
+
+    return log2(length) / (length * H)
+
+
 # --- Debugging
 
 if __name__ == "__main__":
     # Code for debugging purposes.
-    #from doctest import testmod
-    #print("\nTesting automatically all the docstring written in each functions of this module :")
-    #testmod(verbose=True)
 
     from numpy import random
     #seq_channels = ['10110100111001010010100000011',
@@ -146,4 +162,4 @@ if __name__ == "__main__":
 
     agg_seq = ''.join(seq_channels)
     complexity, _ = lempel_ziv_complexity(agg_seq)
-    print(f'1-dimensional Lempel-Ziv complexity for agg of sequence: {complexity}')
+    print(f'1D Lempel-Ziv complexity for agg of sequence: {complexity}')
