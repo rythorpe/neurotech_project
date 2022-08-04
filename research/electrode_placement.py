@@ -113,9 +113,8 @@ def est_channel_subset(data_binary, n_chan_subset, lr=0.05, epsilon=0.1,
     max_complexity *= normalization_factor(chans_chosen_data)  # XXX fix
 
     complexities = np.zeros(max_iter)
-    iter_idx = 0
 
-    while iter_idx < max_iter:
+    for iter_idx in range(max_iter):
         # select channels
         for choice_idx in range(n_chan_subset):
             previous_choice = chans_chosen[choice_idx]
@@ -159,8 +158,6 @@ def est_channel_subset(data_binary, n_chan_subset, lr=0.05, epsilon=0.1,
                 max_complexity = complexity
                 best_chan_subset = chans_chosen.copy()
 
-            iter_idx += 1
-
     # est_best_chan_subset = np.argmax(reward_prob, axis=1)
 
     return best_chan_subset, max_complexity, complexities
@@ -203,24 +200,30 @@ if __name__ == "__main__":
     data_binary = binarized_data(timeseries=data_post_perturbation,
                                  thresh=std_thresh)
 
-    n_chans = range(4, 5)
+    n_chans = range(4, 7)
+    n_trials = 100
+    iterations = 500
+
+    traj_trials = np.zeros((n_trials, iterations))
     fig, ax = plt.subplots(1, 1)
     for n_chan_subset in n_chans:
-        opt_chans, opt_compl, opt_traj = opt_channel_subset(
-            data_binary=data_binary,
-            n_chan_subset=n_chan_subset)
+        for trial in range(n_trials):
+            #opt_chans, opt_compl, opt_traj = opt_channel_subset(
+            #    data_binary=data_binary,
+            #    n_chan_subset=n_chan_subset)
 
-        est_chans, est_compl, est_traj = est_channel_subset(
-            data_binary=data_binary,
-            n_chan_subset=n_chan_subset,
-            lr=0.01,
-            epsilon=0.1,
-            max_iter=1000)
+            est_chans, est_compl, est_traj = est_channel_subset(
+                data_binary=data_binary,
+                n_chan_subset=n_chan_subset,
+                lr=0.01,
+                epsilon=0.1,
+                max_iter=iterations)
+            traj_trials[trial, :] = est_traj
 
-        plot_electrode_complexities(opt_traj, ax=ax)
-        plot_electrode_complexities(est_traj, ax=ax)
-        ax.axhline(np.median(opt_traj))
-        ax.axhline(est_compl, label='')
+        #plot_electrode_complexities(opt_traj, ax=ax)
+        plot_electrode_complexities(np.mean(traj_trials, axis=0), ax=ax)
+        #ax.axhline(np.median(opt_traj))
+        #ax.axhline(est_compl, label='')
     labels = [f'{n_chan_subset} electrodes' for n_chan_subset in n_chans]
     ax.legend(labels)
     #plt.figure()
